@@ -12,12 +12,35 @@
 ----
 -- @var vehicles[plate_number] = newVehicle Object
 local vehicles = {}
-
+local MyVehicles = {}
+ESX = nil
 ---- Retrieve the keys of a player when he reconnects.
 -- The keys are synchronized with the server. If you restart the server, all keys disappear.
 AddEventHandler("playerSpawned", function()
     TriggerServerEvent("ls:retrieveVehiclesOnconnect")
 end)
+
+Citizen.CreateThread(
+  function()
+    while ESX == nil do
+      TriggerEvent(
+        "esx:getSharedObject",
+        function(obj)
+          ESX = obj
+        end
+      )
+      Citizen.Wait(0)
+    end
+  end
+)
+
+RegisterNetEvent("ls:setOwnedVehicle")
+AddEventHandler(
+  "ls:setOwnedVehicle",
+  function(vehicle)
+    MyVehicles = vehicle
+  end
+)
 
 ---- Main thread
 -- The logic of the script is here
@@ -51,12 +74,13 @@ Citizen.CreateThread(function()
                     local localVehPlate = string.lower(localVehPlateTest)
                     local localVehLockStatus = GetVehicleDoorLockStatus(localVehId)
                     local hasKey = false
+                    local isOwner = (Config.checkOwner and isOwnerThisCar(localVehId))
 
                     -- If the vehicle appear in the table (if this is the player's vehicle or a locked vehicle)
                     for plate, vehicle in pairs(vehicles) do
                         if(string.lower(plate) == localVehPlate)then
                             -- If the vehicle is not locked (this is the player's vehicle)
-                            if(vehicle ~= "locked")then
+                            if(vehicle ~= "locked") or IsOwner then
                                 hasKey = true
                                 if(time > timer)then
                                     -- update the vehicle infos (Useful for hydrating instances created by the /givekey command)
@@ -78,7 +102,7 @@ Citizen.CreateThread(function()
                         -- If the player is inside the vehicle
                         if(isInside)then
                             -- If the player find the keys
-                            if(canSteal())then
+                            if(canSteal() or isOwner)then
                                 -- Check if the vehicle is already owned.
                                 -- And send the parameters to create the vehicle object if this is not the case.
                                 TriggerServerEvent('ls:checkOwner', localVehId, localVehPlate, localVehLockStatus)
@@ -149,6 +173,25 @@ end
 
 ------------------------    EVENTS      ------------------------
 ------------------------     :)         ------------------------
+
+RegisterNetEvent("esx:playerLoaded")
+AddEventHandler(
+  "esx:playerLoaded",
+  function(xPlayer)
+    PlayerData = xPlayer
+    TriggerServerEvent("ls:getOwnedVehicle")
+    lastChecked = GetGameTimer()
+  end
+)
+
+AddEventHandler(
+  "onResourceStart",
+  function()
+    PlayerData = xPlayer
+    TriggerServerEvent("ls:getOwnedVehicle")
+    lastChecked = GetGameTimer()
+  end
+)
 
 ---- Update a vehicle plate (for developers)
 -- @param string oldPlate
@@ -234,6 +277,28 @@ end)
 ------------------------    FUNCTIONS      ------------------------
 ------------------------        :O         ------------------------
 
+-- @return boolean
+function isOwnerThisCar(localVehId)
+    --Vehicle list from db
+    for i = 1, #MyVehicles do
+        local vPlate = all_trim(MyVehicles[i].plate)
+        local vFront = all_trim(GetVehicleNumberPlateText(localVehId))
+        if vPlate == vFront then
+            return true
+        elseif lastChecked < GetGameTimer() - 60000 then
+            TriggerServerEvent("ls:getOwnedVehicle")
+            lastChecked = GetGameTimer()
+            Wait(2000)
+            for i = 1, #MyVehicles do
+            local vPlate = all_trim(MyVehicles[i].plate)
+            local vFront = all_trim(GetVehicleNumberPlateText(localVehId))
+                if vPlate == vFront then
+                    return true
+                end
+            end
+        end
+    end
+end
 ---- A simple algorithm that checks if the player finds the keys or not.
 -- @return boolean
 function canSteal()
@@ -301,3 +366,11 @@ function Notify(text, duration)
 		return
 	end
 end
+
+function all_trim(s)
+    if s then
+      return s:match "^%s*(.*)":match "(.-)%s*$"
+    else
+      return "noTagProvided"
+    end
+  end

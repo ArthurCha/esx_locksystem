@@ -11,14 +11,42 @@
 
 owners = {} -- owners[plate] = identifier
 secondOwners = {} -- secondOwners[plate] = {identifier, identifier, ...}
+
+ESX = nil
+
+TriggerEvent('esx:getSharedObject', function(obj) ESX = obj end)
+
 MySQL.ready(function ()
     MySQL.Async.fetchAll("SELECT `plate`, `owner` FROM owned_vehicles",{}, function(data)
         for _,v in pairs(data) do
             local plate = string.lower(v.plate)
             owners[plate] = v.owner
+
         end
     end)
 end)
+
+RegisterServerEvent("ls:getOwnedVehicle")
+AddEventHandler(
+  "ls:getOwnedVehicle",
+  function()
+    local MyVehicles = {}
+    local _source = source
+    local xPlayer = ESX.GetPlayerFromId(_source)
+    MySQL.Async.fetchAll("SELECT * FROM owned_vehicles WHERE owner = @owner",{["@owner"] = xPlayer.identifier},
+      function(result)
+        if result ~= nil and #result > 0 then
+          for _, v in pairs(result) do
+            local vehicle = json.decode(v.vehicle)
+            table.insert(MyVehicles, {plate = vehicle.plate})
+          end
+        end
+        TriggerClientEvent("ls:setOwnedVehicle", _source, MyVehicles)
+      end
+    )
+  end
+)
+
 RegisterServerEvent("ls:retrieveVehiclesOnconnect")
 AddEventHandler("ls:retrieveVehiclesOnconnect", function()
     local src = source
@@ -79,7 +107,7 @@ AddEventHandler("ls:checkOwner", function(localVehId, plate, lockStatus)
         TriggerClientEvent("ls:getHasOwner", src, nil, localVehId, plate, lockStatus)
     else
         if(owners[plate] == "locked")then
-            TriggerClientEvent("ls:notify", src, _U('keys_not_inside'))
+            TriggerClientEvent("ls:notify", src, "Server" .. _U('keys_not_inside'))
         else
             if(identifier == owners[plate]) then
                 TriggerClientEvent("ls:getHasOwner", src, nil, localVehId, plate, lockStatus)
@@ -92,7 +120,14 @@ end)
 
 RegisterServerEvent("ls:lockTheVehicle")
 AddEventHandler("ls:lockTheVehicle", function(plate)
-    owners[plate] = "locked"
+    local plate = string.lower(plate)
+    local src = source
+    local identifier = GetPlayerIdentifiers(src)[1]
+    if(string.match(tostring(owners[plate]), "steam:") ~= "steam:")then
+        if(not Config.checkOwner)then
+            owners[plate] = "locked"
+        end
+    end
 end)
 
 RegisterServerEvent("ls:haveKeys")
